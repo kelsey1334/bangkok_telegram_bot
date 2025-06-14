@@ -1,109 +1,102 @@
-# bot.py
-import logging
 import os
+import logging
 import requests
-from datetime import datetime
-from telegram import Update, BotCommand
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from datetime import datetime
 
-# === CẤU HÌNH ===
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")  # API thời tiết từ OpenWeatherMap
-EXCHANGE_API_URL = "https://api.exchangerate.host/latest?base=THB&symbols=VND"  # API tỷ giá THB-VND
+# Bật log để dễ debug
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# === GHI LOG ===
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Hàm lấy dữ liệu thời tiết Bangkok từ OpenWeatherMap
+def lay_thoi_tiet():
+    api_key = os.getenv("WEATHER_API_KEY")
+    url = f"https://api.openweathermap.org/data/2.5/weather?q=Bangkok,TH&appid={api_key}&units=metric&lang=vi"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        mo_ta = data['weather'][0]['description'].capitalize()
+        nhiet_do = data['main']['temp']
+        do_am = data['main']['humidity']
+        gio = data['wind']['speed']
+        return f"🌤 Thời tiết Bangkok hôm nay:\n{mo_ta}\n🌡 Nhiệt độ: {nhiet_do}°C\n💧 Độ ẩm: {do_am}%\n💨 Gió: {gio} m/s"
+    except:
+        return "Không thể lấy dữ liệu thời tiết."
 
-# === CÁC LỆNH ===
+# Hàm gọi Gemini để lấy gợi ý món ăn sáng
+def goi_y_bua_sang():
+    api_key = os.getenv("GEMINI_API_KEY")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
+    prompt = "Hãy gợi ý một món ăn sáng ngon miệng phù hợp với người Việt sống ở Bangkok."
+    res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, headers={"Content-Type": "application/json"})
+    try:
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return "Không thể lấy gợi ý món ăn."
+
+# Hàm gọi Gemini để lấy câu nói truyền động lực
+def trich_dan_truyen_dong_luc():
+    api_key = os.getenv("GEMINI_API_KEY")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
+    prompt = "Hãy tạo một câu nói truyền động lực ngắn gọn bằng tiếng Việt."
+    res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, headers={"Content-Type": "application/json"})
+    try:
+        data = res.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return "Không thể lấy câu truyền động lực."
+
+# Hàm lấy tỷ giá 100 Baht sang VND từ exchangerate.host
+def ty_gia_baht():
+    try:
+        res = requests.get("https://api.exchangerate.host/convert?from=THB&to=VND&amount=100")
+        data = res.json()
+        gia = round(data['result'])
+        return f"💱 100 Baht = {gia} VND"
+    except:
+        return "Không thể lấy tỷ giá."
+
+# Lệnh /start
 async def bat_dau(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    thong_diep = (
-        "🤖 Xin chào! Tôi là trợ lý Telegram hỗ trợ cuộc sống tại Bangkok 🇹🇭\n\n"
-        "Các lệnh bạn có thể dùng:\n"
-        "/weather - Xem thời tiết hôm nay\n"
-        "/exchange - Tỷ giá THB → VND\n"
-        "/quote - Câu nói truyền động lực\n"
-        "/food - Gợi ý món ăn sáng\n"
-        "/translate <nội dung> - Dịch TH-VI-EN\n"
-        "/remind <nội dung> - Nhắc việc (giả lập)\n"
-        "/note <ghi chú> - Ghi chú nhanh"
-    )
-    await update.message.reply_text(thong_diep)
+    chao = "🤖 Xin chào! Đây là trợ lý của bạn tại Bangkok 🇹🇭.\n\nCác lệnh bạn có thể sử dụng:\n" \
+           "+ /weather – Xem thời tiết hôm nay\n" \
+           "+ /breakfast – Gợi ý món ăn sáng\n" \
+           "+ /quote – Câu nói truyền động lực\n" \
+           "+ /exchange – Tỷ giá Baht-VND"
+    await update.message.reply_text(chao)
 
+# Lệnh /weather
 async def thoi_tiet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = f"https://api.openweathermap.org/data/2.5/weather?q=Bangkok&appid={WEATHER_API_KEY}&units=metric"
-    res = requests.get(url).json()
-    mo_ta = res['weather'][0]['description'].capitalize()
-    nhiet_do = res['main']['temp']
-    ket_qua = f"🌤️ Thời tiết Bangkok: {mo_ta}, {nhiet_do}°C"
+    ket_qua = lay_thoi_tiet()
     await update.message.reply_text(ket_qua)
 
-async def ty_gia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    res = requests.get(EXCHANGE_API_URL).json()
-    gia = res['rates']['VND']
-    ket_qua = f"💱 100 THB ≈ {int(gia*100):,} VND"
-    await update.message.reply_text(ket_qua)
+# Lệnh /breakfast
+async def bua_sang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mon = goi_y_bua_sang()
+    await update.message.reply_text(f"🍽 Gợi ý món ăn sáng:\n{mon}")
 
-async def cau_noi_truyen_dong_luc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
-    noi_dung = {"contents": [{"parts": [{"text": "Give me one short motivational quote in English."}]}]}
-    res = requests.post("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent", json=noi_dung, headers=headers)
-    trich_dan = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-    await update.message.reply_text(f"✨ {trich_dan}")
+# Lệnh /quote
+async def cau_noi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    trich_dan = trich_dan_truyen_dong_luc()
+    await update.message.reply_text(f"💬 {trich_dan}")
 
-async def goi_y_mon_an(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
-    noi_dung = {"contents": [{"parts": [{"text": "Suggest one Thai breakfast dish with short description."}]}]}
-    res = requests.post("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent", json=noi_dung, headers=headers)
-    mon_an = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-    await update.message.reply_text(f"🍜 {mon_an}")
+# Lệnh /exchange
+async def ti_gia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    gia = ty_gia_baht()
+    await update.message.reply_text(gia)
 
-async def dich_ngon_ngu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Vui lòng nhập nội dung để dịch. Ví dụ: /translate Xin chào")
-    van_ban = ' '.join(context.args)
-    headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
-    prompt = f"Translate this between Thai, Vietnamese, and English automatically: {van_ban}"
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
-    res = requests.post("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent", json=body, headers=headers)
-    ket_qua = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-    await update.message.reply_text(ket_qua)
-
-async def nhac_viec(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cong_viec = ' '.join(context.args)
-    if not cong_viec:
-        return await update.message.reply_text("Vui lòng nhập nội dung cần nhắc. Ví dụ: /remind họp lúc 2 giờ chiều")
-    await update.message.reply_text(f"⏰ Đã lưu lời nhắc: {cong_viec} (demo, chưa lưu thật)")
-
-async def ghi_chu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    noi_dung = ' '.join(context.args)
-    if not noi_dung:
-        return await update.message.reply_text("Vui lòng nhập ghi chú. Ví dụ: /note Gọi mẹ")
-    await update.message.reply_text(f"📝 Đã lưu ghi chú: {noi_dung} (demo, chưa lưu thật)")
-
-# === KHỞI ĐỘNG BOT ===
+# Khởi tạo bot
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    token = os.getenv("TELEGRAM_TOKEN")
+    app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("start", bat_dau))
     app.add_handler(CommandHandler("weather", thoi_tiet))
-    app.add_handler(CommandHandler("exchange", ty_gia))
-    app.add_handler(CommandHandler("quote", cau_noi_truyen_dong_luc))
-    app.add_handler(CommandHandler("food", goi_y_mon_an))
-    app.add_handler(CommandHandler("translate", dich_ngon_ngu))
-    app.add_handler(CommandHandler("remind", nhac_viec))
-    app.add_handler(CommandHandler("note", ghi_chu))
+    app.add_handler(CommandHandler("breakfast", bua_sang))
+    app.add_handler(CommandHandler("quote", cau_noi))
+    app.add_handler(CommandHandler("exchange", ti_gia))
 
-    app.bot.set_my_commands([
-        BotCommand("start", "Khởi động bot"),
-        BotCommand("weather", "Thời tiết Bangkok"),
-        BotCommand("exchange", "Tỷ giá THB-VND"),
-        BotCommand("quote", "Câu nói truyền động lực"),
-        BotCommand("food", "Gợi ý món ăn sáng"),
-        BotCommand("translate", "Dịch ngôn ngữ"),
-        BotCommand("remind", "Nhắc việc"),
-        BotCommand("note", "Ghi chú")
-    ])
-
-    print("Bot đang chạy...")
+    print("🤖 Bot đang chạy...")
     app.run_polling()
